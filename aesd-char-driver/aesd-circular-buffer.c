@@ -14,10 +14,36 @@
 #include <string.h>
 #endif
 
-#include "aesd-circular-buffer.h"
-#include <stdlib.h>
-#include <stdio.h>
+#include <linux/init.h>
+#include <linux/module.h>
+#include <linux/kernel.h> // Provides printk() and fundamental macros
 
+#include "aesd-circular-buffer.h"
+//#include <stdlib.h>
+//#include <stdio.h>
+
+int getTotalSizeFromFIFO(struct aesd_circular_buffer *cir_buffer){
+  int totalSize = 0;
+  int u=0;
+  
+  for (u=0;u<AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;u++){
+    //printk("entry[%d]=%s\n",u,cir_buffer->entry[u]);
+    if (cir_buffer->entry[u].buffptr != NULL)
+      totalSize += cir_buffer->entry[u].size - 1 ; //less \0
+  }
+  //totalSize += 1; //end with \0
+  return totalSize;
+}
+void sanity_check(struct aesd_circular_buffer *cir_buffer) {
+  int u=0;
+  printk("start circular buffer sanity check");
+  printk("in_offs=%d",cir_buffer->in_offs);
+  printk("out_offs=%d",cir_buffer->out_offs);
+  for (u=0;u<AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;u++){
+    printk("entry[%d]=%s\n",u,cir_buffer->entry[u].buffptr);
+  }
+  printk("end circular buffer sanity check");
+}
 /**
  * @param buffer the buffer to search for corresponding offset.  Any necessary locking must be performed by caller.
  * @param char_offset the position to search for in the buffer list, describing the zero referenced
@@ -136,15 +162,7 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *cir_buffer, con
     //MAX=AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED
     //check isFull flag, wrap index
     cir_buffer->full = cir_buffer->count == AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;//(cir_buffer->out_offs == cir_buffer->in_offs);
-    if(cir_buffer->full)
-    {
-	  //if ((cir_buffer->in_offs) == (AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED )) 
-          { 
-			cir_buffer->in_offs = 0; //cir_buffer->in_offs % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
-			cir_buffer->out_offs = cir_buffer->in_offs + 1;
-			cir_buffer->count = AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED; //do not change the count
-	  }
-    }
+    
    
 
     
@@ -163,15 +181,30 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *cir_buffer, con
     
     cir_buffer->entry[cir_buffer->in_offs].buffptr = add_entry->buffptr;
     
+    
     //printf("done setting up buffer->entry[buffer->in_offs]=add_entry\n");
+    if(cir_buffer->full)
+    {
+	  //if ((cir_buffer->in_offs) == (AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED )) 
+          { 
+			//cir_buffer->in_offs = (++cir_buffer->in_offs) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED ;
+			//cir_buffer->in_offs = cir_buffer->in_offs + 1;
+			cir_buffer->out_offs = cir_buffer->in_offs + 1;
+			cir_buffer->out_offs = cir_buffer->out_offs % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+			cir_buffer->count = AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED; //do not change the count
+			//cir_buffer->count = 0; //do not change the count
+			//cir_buffer->full = false;
+	  }
+    }
     
-    
-    
+    cir_buffer->in_offs = cir_buffer->in_offs + 1;
+    cir_buffer->in_offs = cir_buffer->in_offs % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED ;
     
      //assert(add_entry);
      //update indecx to next free slot,note that we dont wrap around, as the next slot is not being utilized
     if(!cir_buffer->full) { //update when it is not full, else forego updating, just keep overwriting
-      ++(cir_buffer->in_offs) ; //update in_offs to point to next empty slot
+      //++(cir_buffer->in_offs) ; //update in_offs to point to next empty slot
+      
       ++cir_buffer->count;
     }
     
@@ -181,6 +214,7 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *cir_buffer, con
 */
 void aesd_circular_buffer_init(struct aesd_circular_buffer *cir_buffer)
 {
+    //memset okay to use in kernel
     memset(cir_buffer,0,sizeof(struct aesd_circular_buffer));
     /*
     //int buff_size = sizeof(struct aesd_circular_buffer);

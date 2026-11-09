@@ -11,9 +11,9 @@
 #ifdef __KERNEL__
 #include <linux/types.h>
 #else
-#include <stddef.h> // size_t
-#include <stdint.h> // uintx_t
-#include <stdbool.h>
+//#include <stddef.h> // size_t
+//#include <stdint.h> // uintx_t
+//#include <stdbool.h>
 #endif
 
 
@@ -61,6 +61,10 @@ extern struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos
 extern void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry);
 
 extern void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer);
+
+extern void sanity_check(struct aesd_circular_buffer *cir_buffer); 
+
+extern int getTotalSizeFromFIFO(struct aesd_circular_buffer *cir_buffer);
 
 /**
  * Create a for loop to iterate over each member of the circular buffer.
