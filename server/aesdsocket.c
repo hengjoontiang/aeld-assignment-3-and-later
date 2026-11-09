@@ -52,7 +52,12 @@ Opens a stream socket bound to port 9000, failing and returning -1 if any of the
 #include "threading.h"
 
 #define PORT "9000"  // the port users will be connecting to
+
+#if USE_AESD_CHAR_DEVICE == 1
+#define AESD_DATA_FILE "/dev/aesdchar"
+#else
 #define AESD_DATA_FILE "/var/tmp/aesdsocketdata"
+#endif
 #define BACKLOG 10   // how many pending connections queue will hold
 volatile sig_atomic_t stop_flag = 0;
 pthread_mutex_t aesd_file_mutex;
@@ -82,7 +87,7 @@ void init_file(char * filename){
           fptr = NULL; 
 }
 void write_file(char * stream_buffer, int numchar_to_write, char * filename){
-
+          printf("start write_file\n");
           //check mutex
           pthread_mutex_lock(&aesd_file_mutex);
           
@@ -102,30 +107,41 @@ void write_file(char * stream_buffer, int numchar_to_write, char * filename){
           
           //let go of mutex
           pthread_mutex_unlock(&aesd_file_mutex);
+          
+          printf("end write_file\n");
 }
 char * read_file(ssize_t* numbytes, char * filename) {
+            //printf("start read_file\n");
+            syslog(LOG_INFO,"start read_file");
             char* stream_buffer;
             FILE *fptr;//for client data store
             //ssize_t numbytes;
             
-            
+            syslog(LOG_INFO,"pthread_mutex_lock");
             pthread_mutex_lock(&aesd_file_mutex);
             
+            syslog(LOG_INFO,"fopen");
             fptr = fopen(filename,"r");
             if(fptr == NULL){
                 perror("Missing file to send back to client");
                 exit(1);
             }
             /* Get the number of bytes */
+            syslog(LOG_INFO,"fseek");
             fseek(fptr, 0L, SEEK_END);
+            syslog(LOG_INFO,"ftell");
+            /*THIS IS IMPORTANT, wehn we get the wrong *numbytes, we cannot fetch properly*/
             *numbytes = ftell(fptr);
             /* reset the file position indicator to 
             the beginning of the file */
             //fseek(fptr, 0L, SEEK_SET);	
             /* grab sufficient memory for the 
             buffer to hold the text */
+            syslog(LOG_INFO,"rewind");
             rewind(fptr);
             //printf("size of file =%d\n",(int)(*numbytes));
+            syslog(LOG_INFO,"malloc");
+            syslog(LOG_INFO,"*numbytes=%d",*numbytes);
             stream_buffer = (char*)malloc((*numbytes)*sizeof(char));
             //buffer = (char*) malloc(sizeof(char) * (string_size + 1) );
             /* memory error */
@@ -134,6 +150,8 @@ char * read_file(ssize_t* numbytes, char * filename) {
                 exit(1);
             }
             /* copy all the text into the buffer */
+            syslog(LOG_INFO,"fread");
+            //check *numbytes not correct
             int read_size = fread(stream_buffer, sizeof(char), *numbytes, fptr);
             //read_size = fread(buffer, sizeof(char), string_size, handler);
             //stream_buffer[*numbytes]='\0';
@@ -147,8 +165,11 @@ char * read_file(ssize_t* numbytes, char * filename) {
             }
             fclose(fptr);
             //fptr = NULL; 
+            syslog(LOG_INFO,"stream_buffer=%s\n",stream_buffer);
             
             pthread_mutex_unlock(&aesd_file_mutex);
+            
+            syslog(LOG_INFO,"end read_file\n");
             
             return stream_buffer;
 }
@@ -171,11 +192,19 @@ void timer_handler (int signum){
   struct tm tm = *localtime(&t);
   // 2025-08-17 19:26:01
   //01234567890123456789
+  
+  
   char buffer[50];
   sprintf(buffer,"timestamp: %d-%02d-%02d %02d:%02d:%02d\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
   printf("%s\n",buffer);
   
+  
+  #if USE_AESD_CHAR_DEVICE == 1
+  #else
   write_file(buffer, sizeof(buffer),AESD_DATA_FILE);
+  #endif
+  
+  
 }
 //read file contents into a buffer
 void* threadfunc(void* thread_param)
@@ -184,7 +213,7 @@ void* threadfunc(void* thread_param)
     // TODO: wait, obtain mutex, wait, release mutex as described by thread_data structure
     // hint: use a cast like the one below to obtain thread arguments from your parameter
     struct thread_data* thread_func_args = NULL;
-    
+    printf("start threadfunc\n");
     
    
     int clientfd;
@@ -235,6 +264,7 @@ void* threadfunc(void* thread_param)
 int aesd_main(void)
 {
 
+    syslog(LOG_INFO,"aesd_main start");
     //signal(SIGINT, signal_handler); // Register the signal handler
     //#CTRL-C in aesd
     if (signal(SIGINT, sigint_handler) == SIG_ERR) {
@@ -249,11 +279,15 @@ int aesd_main(void)
         perror("Error setting SIGTERM handler");
         exit(1);
     }
+    
+   
     if (signal(SIGALRM, timer_handler) == SIG_ERR) { // Install signal handler
         perror("Error setting SIGALRM handler");
         exit(1);
     }
+    
     //alarm(10); // Schedule SIGALRM in 5 seconds
+    
     
     
     struct itimerval new_value;
@@ -279,9 +313,9 @@ int aesd_main(void)
     FILE *fptr;//for client data store
     
     //init_file(AESD_DATA_FILE);
-    fptr = fopen(AESD_DATA_FILE,"w");
+    //fptr = fopen(AESD_DATA_FILE,"w");
     //fprintf(fp, "Hello, world!\n");
-    fclose(fptr); // Close the file
+    //fclose(fptr); // Close the file
     
     openlog("Syslog",0,LOG_USER);
     
@@ -391,7 +425,7 @@ int aesd_main(void)
         */
         //printf("fork()\n");
         if (!fork()) { 
-           //printf("child process\n");
+            printf("child process\n");
         //sub process invoked by server to handle comms with client; THOIS IS NOT the CLIENT
         //note that this client handler need to handle sigint / sigterm
         
@@ -417,7 +451,7 @@ int aesd_main(void)
             pthread_t thread_array[100];
             int pthread_count = 0;//reset threadcount
             while ( !stop_flag) { //this while loop will continue to create new threads to rec till we have recieved end of line,which will break out of loop
-              //printf("rec loop stop_flag=%d\n",stop_flag);
+              printf("rec loop stop_flag=%d\n",stop_flag);
               //if (stop_flag) break; //to handle SIGINT/SIGTERM
               //non blocking read till client has stopped sending
               fd_set read_fds;
@@ -515,6 +549,8 @@ int aesd_main(void)
             //buffer[total_received]='\0';//snull terminate for string
             //printf("adjusted length of string with null terminator =%d\n",total_received);
             //printf("buffer=%s",buffer);
+            
+            syslog(LOG_INFO,"write_file , buffer=%s\n",buffer);
             write_file(buffer, total_received,AESD_DATA_FILE);
             //fptr = fopen(AESD_DATA_FILE,"a");//truncate any existing and append
             /*
@@ -527,7 +563,15 @@ int aesd_main(void)
             
             //read file copntents into a buffer
             ssize_t numbytes_file;
+            syslog(LOG_INFO,"read_file just after write_file\n");
+            syslog(LOG_INFO,"reading from %s\n",AESD_DATA_FILE);
+            syslog(LOG_INFO,"before numbytes_file=%s\n",(int)numbytes_file);
+            
+            //check this read_file, it crashed
             stream_buffer = read_file(&numbytes_file,AESD_DATA_FILE) ;
+            
+            syslog(LOG_INFO,"after numbytes_file=%d\n",(int)numbytes_file);
+            syslog(LOG_INFO,"stream_buffer=%s\n",stream_buffer);
             //printf("numbytes_file=%d\n",(int)numbytes_file);
             //printf("stream_buffer=%s",stream_buffer);
             //send non blocking -- aloows sigint/sigterm to interrupt while loop -- server send to client
@@ -540,7 +584,7 @@ int aesd_main(void)
               //if (stop_flag) break; //to handle SIGINT/SIGTERM
               //non blocking send to client till the whole file has been sent
               
-              
+              syslog(LOG_INFO,"send(clientfd, stream_buffer + total_sent, bytes_to_send - total_sent, 0)");
               ssize_t sent_this_call = send(clientfd, stream_buffer + total_sent, bytes_to_send - total_sent, 0);
               //printf("sent_this_call=%d\n",(int)sent_this_call);
               if (sent_this_call == -1) {
@@ -563,60 +607,100 @@ int aesd_main(void)
               }
               if (total_sent == bytes_to_send) {
                 //printf("total_sent == bytes_to_send");
+                syslog(LOG_INFO,"total_sent == bytes_to_send\n");
                 //free(buffer);
                 //buffer = NULL;
-                break; //finished sending, break out of loop
+                //break; //finished sending, break out of loop
+                goto breakout;
               }
             }
+            /*
+            syslog(LOG_INFO,"close(clientfd) just before exit(0)\n");
             close(clientfd);
-            syslog(LOG_INFO,"Closed connection from %s\n",s);
-            //close(fptr);
+            close(sockfd);
+            
+            fclose(fptr);
             exit(0);
+            */
         }//if (!fork()) { 
         //printf("main process\n");
         //close(clientfd);  // parent doesn't need this
     }//while (!stop_flag) 
 
+breakout:
+    syslog(LOG_INFO,"if (fptr != NULL) \n");
     if (fptr != NULL) {
         //cleann  up the file for next run
         //printf("cleaning up fptr\n");
-        //fclose(fptr);
-        //fptr = NULL; // Optional: set to NULL after closing to avoid dangling pointer
+        syslog(LOG_INFO,"fclose(fptr)\n");
+        fclose(fptr);
+        fptr = NULL; // Optional: set to NULL after closing to avoid dangling pointer
         
         //delete the file
         // /var/tmp/aesdsocketdata
     }
     //try to close any still opened socket
+    
+    #if USE_AESD_CHAR_DEVICE == 1
+    syslog(LOG_INFO,"not remove(AESD_DATA_FILE)");
+    #else
+    syslog(LOG_INFO,"remove(AESD_DATA_FILE)");
     remove(AESD_DATA_FILE);
+    #endif
+    
+    
     close(clientfd); 
     close(sockfd); 
     alarm(0);
     // Destroy the mutex
     pthread_mutex_destroy(&aesd_file_mutex);
     destroy_array_list(&threadsafearraylist);
+    syslog(LOG_INFO,"aesd_main end");
     closelog();
+    
+    
+    
     return 0;
 }
 
 void daemonize() {
+    printf("start daemonize\n");
     pid_t pid;
 
     // 1. Fork off the parent process
     pid = fork();
+    printf("fork\n");
+    // If fork fails, log error and exit
     if (pid < 0) {
+        perror("First fork failed");
+        exit(EXIT_FAILURE);
+    }
+
+    // If we are the parent process, terminate it
+    if (pid > 0) {
+        printf("Moving process to the background. Child PID: %d\n", pid);
+        exit(EXIT_SUCCESS);
+    }
+
+    // 2. Create a new Session ID (SID) for the child process
+    // This makes the child the session leader and detaches it from the terminal
+    if (setsid() < 0) {
+        perror("Failed to create new session");
+        exit(EXIT_FAILURE);
+    }
+
+    // 3. Second Fork (Optional but highly recommended)
+    // Ensures the daemon can never re-acquire a controlling terminal
+    pid = fork();
+    if (pid < 0) {
+        perror("Second fork failed");
         exit(EXIT_FAILURE);
     }
     if (pid > 0) {
-        exit(EXIT_SUCCESS); // Parent exits
+        exit(EXIT_SUCCESS); // Close the first child
     }
-
-    // 2. Create a new session
-    if (setsid() < 0) {
-        exit(EXIT_FAILURE);
-    }
-
     
-
+    printf("umask(0)\n");
     // 4. Reset the file mode mask
     umask(0);
 
@@ -629,7 +713,7 @@ void daemonize() {
     dup(0); // stdout
     dup(0); // stderr
 
-    
+    printf("end daemonize\n");
 }
 int main(int argc,char *argv[]) {
   if (argc > 2) {
@@ -649,7 +733,7 @@ int main(int argc,char *argv[]) {
   }
   if (IsDaemon)
     daemonize();
-  
+  printf("aesd_main\n");
   aesd_main();
   
   return 0;

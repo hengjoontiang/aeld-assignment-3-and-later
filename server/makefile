@@ -3,6 +3,6 @@
 #CC=${CROSS_COMPILE}gcc
 default:all
 all:aesdsocket.c
-	${CC} -o aesdsocket aesdsocket.c ThreadSafeArrayList.c -I.
+	${CC} -o aesdsocket aesdsocket.c ThreadSafeArrayList.c -I. -DUSE_AESD_CHAR_DEVICE=1
 clean:
 	rm -f aesdsocket *.o
